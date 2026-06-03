@@ -1,25 +1,18 @@
-
 const express = require("express");
 const dotenv = require("dotenv");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+
+const { jwtVerify, createRemoteJWKSet } = require("jose-cjs");
 dotenv.config();
-
-
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const uri = process.env.MONGODB_URI;
-
 const port = process.env.PORT || 5000;
 
-
-
-
-
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
     serverApi: {
         version: ServerApiVersion.v1,
@@ -27,43 +20,68 @@ const client = new MongoClient(uri, {
         deprecationErrors: true,
     }
 });
+
+
+
+
+
+
+
+const JWKS = createRemoteJWKSet(
+    new URL(`${process.env.CLIENT_URI}/api/auth/jwks`)
+)
+
+
+const verifyToken = async (req, res, next) => {
+    const header = req?.headers.authorization;
+    if (!header) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+    const token = header.split(" ")[1];
+    if (!token) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+    try {
+        const { payload } = await jwtVerify(token, JWKS);
+        console.log(payload)
+        next()
+    } catch (error) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+}
+
+
+
+
+
+
+
+
+
 async function run() {
     try {
-
-
         const db = client.db("youtube_clone");
         const usersCollection = db.collection("users");
         const videosCollection = db.collection("videos");
         const commentsCollection = db.collection("comments");
 
-
-
         app.get('/', (req, res) => {
-            res.send("Hello from youtube clon server")
-        })
+            res.send("Hello from youtube clone server")
+        });
 
-        // app.get('/videos', async (req, res) => {
-        //     const videos = await videosCollection.find().toArray();
-        //     res.send(videos);
-        // })
-
-
-
-
+        // 🎬 সব ভিডিও নিয়ে আসা 
         app.get('/videos', async (req, res) => {
             try {
                 const videosWithChannels = await videosCollection.aggregate([
                     {
-                        // 🎯 সরাসরি স্ট্রিং-এর সাথে স্ট্রিং JOIN করা হচ্ছে
                         $lookup: {
-                            from: "users",           // ইউজার কালেকশন
-                            localField: "userId",    // videos কালেকশনের স্ট্রিং ফিল্ড
-                            foreignField: "_id",     // users কালেকশনের স্ট্রিং ফিল্ড
-                            as: "channel"            // যে নামে অবজেক্ট তৈরি হবে
+                            from: "users",
+                            localField: "userId",   // videos কালেকশনের String ফিল্ড
+                            foreignField: "_id",    // users কালেকশনের String ফিল্ড
+                            as: "channel"
                         }
                     },
                     {
-                        // lookup-এর অ্যারেকে ভেঙে সিঙ্গেল অবজেক্ট করা
                         $unwind: {
                             path: "$channel",
                             preserveNullAndEmptyArrays: true
@@ -78,30 +96,44 @@ async function run() {
             }
         });
 
-
-
-
-
+        // সিঙ্গেল ভিডিও 
         app.get('/videos/:id', async (req, res) => {
             try {
                 const id = req.params.id;
 
+                // 🎯 ডাইনামিক আইডি হ্যান্ডেলার: 
+                // আইডি যদি ভ্যালিড ওবজেক্ট আইডি ফরম্যাটের হয়, তবে সে ObjectId এবং String দুইভাবেই খুঁজবে
+                let matchQuery = { _id: id }; // ডিফল্ট স্ট্রিং ম্যাচিং
+
+                if (ObjectId.isValid(id)) {
+                    matchQuery = {
+                        $or: [
+                            { _id: id },              // ম্যানুয়াল স্ট্রিং আইডির জন্য
+                            { _id: new ObjectId(id) } // ফ্রন্টএন্ডের অরিজিনাল ObjectId এর জন্য
+                        ]
+                    };
+                }
+
                 const videoWithChannel = await videosCollection.aggregate([
                     {
-
-                        $match: { _id: id }
+                        // 🟢 এখন স্ট্রিং বা অবজেক্ট আইডি—যেকোনো একটা মিললেই ডাটা চলে আসবে
+                        $match: matchQuery
                     },
                     {
-
+                        // ভিডিওর userId ফিল্ডটিকে String-এ কনভার্ট করা (কারণ users কালেকশনের _id-ও String)
+                        $addFields: {
+                            userIdStr: { $toString: "$userId" }
+                        }
+                    },
+                    {
                         $lookup: {
                             from: "users",
-                            localField: "userId",
+                            localField: "userIdStr",
                             foreignField: "_id",
                             as: "channel"
                         }
                     },
                     {
-
                         $unwind: {
                             path: "$channel",
                             preserveNullAndEmptyArrays: true
@@ -109,108 +141,114 @@ async function run() {
                     }
                 ]).toArray();
 
-
                 if (videoWithChannel.length > 0) {
                     res.send(videoWithChannel[0]);
                 } else {
                     res.status(404).send({ message: "Video not found" });
                 }
-
             } catch (error) {
                 console.error("Single Video Aggregation Error:", error);
                 res.status(500).send("Server Error");
             }
         });
 
-
-
-        // 1️⃣ লাইক বাটন চাপলে কী হবে
-        app.put('/videos/:id/like', async (req, res) => {
+        // সিঙ্গেল ভিডিও লাইক রাউট
+        app.put('/videos/:id/like', verifyToken, async (req, res) => {
             try {
                 const videoId = req.params.id;
                 const { userId } = req.body;
 
                 if (!userId) return res.status(400).send({ message: "User ID required" });
+                
+                let query = { _id: videoId };
+                if (ObjectId.isValid(videoId)) {
+                    query = { $or: [{ _id: videoId }, { _id: new ObjectId(videoId) }] };
+                }
 
-                const video = await videosCollection.findOne({ _id: videoId });
+                const video = await videosCollection.findOne(query);
                 if (!video) return res.status(404).send({ message: "Video not found" });
 
                 const isLiked = video.likes?.includes(userId);
+                let updateDoc = isLiked
+                    ? { $pull: { likes: userId } }
+                    : { $addToSet: { likes: userId }, $pull: { dislikes: userId } };
 
-                let updateDoc;
-                if (isLiked) {
-                    // অলরেডি লাইক থাকলে ➡️ শুধু লাইক তোলো
-                    updateDoc = { $pull: { likes: userId } };
-                } else {
-                    // লাইক না থাকলে ➡️ লাইক দাও এবং একই সাথে ডিসলাইক অ্যারে থেকে আইডি থাকলে তা বের ($pull) করে দাও
-                    updateDoc = {
-                        $addToSet: { likes: userId },
-                        $pull: { dislikes: userId }
-                    };
-                }
-
-                await videosCollection.updateOne({ _id: videoId }, updateDoc);
+                await videosCollection.updateOne({ _id: video._id }, updateDoc);
                 res.send({ success: true });
             } catch (error) {
                 res.status(500).send("Server Error");
             }
         });
 
-        // 2️⃣ ডিসলাইক বাটন চাপলে কী হবে
-        app.put('/videos/:id/dislike', async (req, res) => {
+        // সিঙ্গেল ভিডিও ডিসলাইক রাউট
+        app.put('/videos/:id/dislike', verifyToken, async (req, res) => {
             try {
                 const videoId = req.params.id;
                 const { userId } = req.body;
 
                 if (!userId) return res.status(400).send({ message: "User ID required" });
+                
+                let query = { _id: videoId };
+                if (ObjectId.isValid(videoId)) {
+                    query = { $or: [{ _id: videoId }, { _id: new ObjectId(videoId) }] };
+                }
 
-                const video = await videosCollection.findOne({ _id: videoId });
+                const video = await videosCollection.findOne(query);
                 if (!video) return res.status(404).send({ message: "Video not found" });
 
                 const isDisliked = video.dislikes?.includes(userId);
+                let updateDoc = isDisliked
+                    ? { $pull: { dislikes: userId } }
+                    : { $addToSet: { dislikes: userId }, $pull: { likes: userId } };
 
-                let updateDoc;
-                if (isDisliked) {
-                    // অলরেডি ডিসলাইক থাকলে ➡️ শুধু ডিসলাইক তোলো
-                    updateDoc = { $pull: { dislikes: userId } };
-                } else {
-                    // ডিসলাইক না থাকলে ➡️ ডিসলাইক দাও এবং একই সাথে লাইক অ্যারে থেকে আইডি থাকলে তা বের ($pull) করে দাও
-                    updateDoc = {
-                        $addToSet: { dislikes: userId },
-                        $pull: { likes: userId }
-                    };
-                }
-
-                await videosCollection.updateOne({ _id: videoId }, updateDoc);
+                await videosCollection.updateOne({ _id: video._id }, updateDoc);
                 res.send({ success: true });
             } catch (error) {
                 res.status(500).send("Server Error");
             }
         });
 
-
-
-
+        // 👥 সব ইউজার গেট রাউট
         app.get('/users', async (req, res) => {
             const users = await usersCollection.find().toArray();
             res.send(users);
-        })
+        });
 
-
-        app.put('/users/:channelId/subscribe', async (req, res) => {
+        
+        //  চ্যানেল সাবস্ক্রাইব এবং আনসাবস্ক্রাইব রাউট 
+        app.put('/users/:id/subscribe', async (req, res) => {
             try {
-                const { channelId } = req.params;
-                const { isSubscribing } = req.body; // ফ্রন্টএন্ড থেকে true/false পাঠাবো
+                const { id: channelId } = req.params; 
+                const { userId, isSubscribing } = req.body;
 
-                //isSubscribing যদি true হয় তবে সংখ্যা ১ বাড়বে, false হলে ১ কমবে
+                if (!userId || !channelId) {
+                    return res.status(400).send({ message: "User ID and Channel ID are required" });
+                }
+
+                
+                if (userId === channelId) {
+                    return res.status(400).send({ message: "You cannot subscribe to your own channel" });
+                }
+
                 const changeValue = isSubscribing ? 1 : -1;
 
-                const result = await usersCollection.updateOne(
+                
+                await usersCollection.updateOne(
                     { _id: channelId },
-                    { $inc: { subscribers: changeValue } } // মঙ্গোডিবি $inc দিয়ে সরাসরি নাম্বার আপডেট করে
+                    { $inc: { subscribers: changeValue } }
                 );
 
-                res.send({ success: true });
+               
+                let userUpdateDoc = isSubscribing
+                    ? { $addToSet: { following: channelId } }
+                    : { $pull: { following: channelId } };    
+
+                await usersCollection.updateOne(
+                    { _id: userId },
+                    userUpdateDoc
+                );
+
+                res.send({ success: true, isSubscribed: isSubscribing });
             } catch (error) {
                 console.error("Subscribe Error:", error);
                 res.status(500).send("Server Error");
@@ -218,44 +256,254 @@ async function run() {
         });
 
 
+
+
+        // 👤 সিঙ্গেল ইউজার ডাটা রাউট
         app.get('/users/:userId', async (req, res) => {
             const { userId } = req.params;
             const result = await usersCollection.findOne({ _id: userId });
             res.json(result);
-        })
+        });
+
+        //  নির্দিষ্ট চ্যানেলের প্রোফাইল ও ভিডিও ডাটা গেট রাউট
+        app.get('/channels/:id', async (req, res) => {
+            try {
+                const channelId = req.params.id;
+                const channelProfile = await usersCollection.findOne({ _id: channelId });
+
+                if (!channelProfile) {
+                    return res.status(404).send({ message: "Channel not found" });
+                }
+
+                const channelVideos = await videosCollection.find({ userId: channelId }).toArray();
+
+                res.send({
+                    profile: channelProfile,
+                    videos: channelVideos
+                });
+            } catch (error) {
+                console.error("Channel Profile API Error:", error);
+                res.status(500).send("Server Error");
+            }
+        });
+
+        //  চ্যানেল ক্রিয়েট/আপডেট রাউট 
+        app.post('/api/channel/create', verifyToken, async (req, res) => {
+            try {
+                const { userId, channelName, username, bio, avatar, coverImage } = req.body;
+
+                if (!userId || !channelName || !username) {
+                    return res.status(400).send({ message: "Required fields missing (userId, channelName, username)" });
+                }
+
+                const updateDoc = {
+                    $set: {
+                        username: username,
+                        channelName: channelName,
+                        bio: bio || "Full‑stack developer simplifying coding for everyone.",
+                        avatar: avatar || "https://randomuser.me/api/portraits/men/32.jpg",
+                        coverImage: coverImage || "https://picsum.photos/id/0/1200/300",
+                        subscribers: 0,
+                        totalVideos: 0,
+                        createdAt: new Date().toISOString()
+                    }
+                };
+
+                await usersCollection.updateOne(
+                    { _id: userId },
+                    updateDoc,
+                    { upsert: true }
+                );
+
+                res.send({ success: true });
+            } catch (error) {
+                console.error("Create Channel Error:", error);
+                res.status(500).send("Server Error");
+            }
+        });
+
+        //  ভিডিও আপলোড রাউট
+        app.post('/api/video/upload', verifyToken, async (req, res) => {
+            try {
+                const { userId, title, description, videoUrl, thumbnailUrl, durationText, category, tags } = req.body;
+
+                const newVideo = {
+                    userId,
+                    title,
+                    description: description || "",
+                    videoUrl,
+                    thumbnailUrl: thumbnailUrl || "https://picsum.photos/id/42/640/360",
+                    durationText: durationText || "0:00", // ফ্রন্টএন্ড কার্ডের জন্য এটি দরকার
+                    category: category || "Education",
+                    tags: tags || [],
+                    views: 0,
+                    likes: [],
+                    dislikes: [],
+                    isPublished: true,
+                    createdAt: new Date() // প্রপার আইএসও ডেট জেনারেট করবে
+                };
+
+                const result = await videosCollection.insertOne(newVideo);
+                res.status(201).send(result);
+            } catch (error) {
+                console.error("Upload Error:", error);
+                res.status(500).send({ message: "Failed to upload video" });
+            }
+        });
+
+
+     
+
+        // নির্দিষ্ট ভিডিওর সব কমেন্ট গেট 
+        app.get('/videos/:id/comments', async (req, res) => {
+            try {
+                const videoId = req.params.id;
+                
+                // Aggregation দিয়ে কমেন্টের সাথে ইউজারের ইনফরমেশন (যেমন নাম, ছবি) যুক্ত করা
+                const comments = await commentsCollection.aggregate([
+                    { $match: { videoId } },
+                    { $sort: { createdAt: -1 } }, // নতুন কমেন্টগুলো আগে দেখাবে
+                    {
+                        $addFields: {
+                            userIdStr: { $toString: "$userId" }
+                        }
+                    },
+                    {
+                        $lookup: {
+                            from: "users",
+                            localField: "userIdStr",
+                            foreignField: "_id",
+                            as: "user"
+                        }
+                    },
+                    {
+                        $unwind: {
+                            path: "$user",
+                            preserveNullAndEmptyArrays: true
+                        }
+                    }
+                ]).toArray();
+
+                res.send(comments);
+            } catch (error) {
+                console.error("Fetch Comments Error:", error);
+                res.status(500).send("Server Error");
+            }
+        });
+
+        // নতুন কমেন্ট পোস্ট করার রাউট (লগইন করা ইউজারদের জন্য)
+        app.post('/videos/:id/comments', verifyToken, async (req, res) => {
+            try {
+                const videoId = req.params.id;
+                const { userId, text } = req.body;
+
+                if (!userId || !text) {
+                    return res.status(400).send({ message: "User ID and text are required" });
+                }
+
+                const newComment = {
+                    videoId,
+                    userId,
+                    text,
+                    createdAt: new Date().toISOString()
+                };
+
+                const result = await commentsCollection.insertOne(newComment);
+                res.status(201).send(result);
+            } catch (error) {
+                console.error("Post Comment Error:", error);
+                res.status(500).send("Server Error");
+            }
+        });
 
 
 
 
 
 
+        //  লাইব্রেরি পেজের জন্য: লগইন করা ইউজারের লাইক দেওয়া সব ভিডিও 
+        app.get('/api/library/liked-videos', verifyToken, async (req, res) => {
+            try {
+               
+                const { userId } = req.query;
+
+                if (!userId) {
+                    return res.status(400).send({ message: "User ID required" });
+                }
+
+                
+                const likedVideos = await videosCollection.aggregate([
+                    {
+                        $match: { likes: userId } 
+                    },
+                    {
+                        $addFields: {
+                            userIdStr: { $toString: "$userId" }
+                        }
+                    },
+                    {
+                        $lookup: {
+                            from: "users",
+                            localField: "userIdStr",
+                            foreignField: "_id",
+                            as: "channel"
+                        }
+                    },
+                    {
+                        $unwind: {
+                            path: "$channel",
+                            preserveNullAndEmptyArrays: true
+                        }
+                    }
+                ]).toArray();
+
+                res.send(likedVideos);
+            } catch (error) {
+                console.error("Liked Videos Fetch Error:", error);
+                res.status(500).send("Server Error");
+            }
+        });
+
+        // লাইব্রেরি পেজের জন্য: ইউজার যেসব চ্যানেল সাবস্ক্রাইব করেছে তাদের লিস্ট  নিয়ে আসা
+        app.get('/api/library/subscribed-channels', verifyToken, async (req, res) => {
+            try {
+                const { userId } = req.query;
+
+                if (!userId) {
+                    return res.status(400).send({ message: "User ID required" });
+                }
+
+               
+                const userProfile = await usersCollection.findOne({ _id: userId });
+
+                if (!userProfile || !userProfile.following || userProfile.following.length === 0) {
+                    return res.send([]); 
+                }
+
+               
+                const subscribedChannels = await usersCollection.find(
+                    { _id: { $in: userProfile.following } },
+                    { projection: { channelName: 1, avatar: 1, subscribers: 1 } } 
+                ).toArray();
+
+                res.send(subscribedChannels);
+            } catch (error) {
+                console.error("Subscribed Channels Fetch Error:", error);
+                res.status(500).send("Server Error");
+            }
+        });
 
 
 
-
-        // Connect the client to the server	(optional starting in v4.7)
+        // Connect the client to the server
         await client.connect();
-        // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {
-        // Ensures that the client will close when you finish/error
-        // await client.close();
+        // Keeps connection alive
     }
 }
 run().catch(console.dir);
-
-
-
-
-
-
-
-
-
-
-
-
 
 app.listen(port, () => {
     console.log(`Server started on port ${port}`);
