@@ -159,7 +159,7 @@ async function run() {
                 const { userId } = req.body;
 
                 if (!userId) return res.status(400).send({ message: "User ID required" });
-                
+
                 let query = { _id: videoId };
                 if (ObjectId.isValid(videoId)) {
                     query = { $or: [{ _id: videoId }, { _id: new ObjectId(videoId) }] };
@@ -187,7 +187,7 @@ async function run() {
                 const { userId } = req.body;
 
                 if (!userId) return res.status(400).send({ message: "User ID required" });
-                
+
                 let query = { _id: videoId };
                 if (ObjectId.isValid(videoId)) {
                     query = { $or: [{ _id: videoId }, { _id: new ObjectId(videoId) }] };
@@ -214,38 +214,39 @@ async function run() {
             res.send(users);
         });
 
-        
+
         //  চ্যানেল সাবস্ক্রাইব এবং আনসাবস্ক্রাইব রাউট 
         app.put('/users/:id/subscribe', async (req, res) => {
             try {
-                const { id: channelId } = req.params; 
+                const { id: channelId } = req.params;
                 const { userId, isSubscribing } = req.body;
 
                 if (!userId || !channelId) {
                     return res.status(400).send({ message: "User ID and Channel ID are required" });
                 }
 
-                
+
                 if (userId === channelId) {
                     return res.status(400).send({ message: "You cannot subscribe to your own channel" });
                 }
 
                 const changeValue = isSubscribing ? 1 : -1;
 
-                
+
                 await usersCollection.updateOne(
                     { _id: channelId },
                     { $inc: { subscribers: changeValue } }
                 );
 
-               
+
                 let userUpdateDoc = isSubscribing
                     ? { $addToSet: { following: channelId } }
-                    : { $pull: { following: channelId } };    
+                    : { $pull: { following: channelId } };
 
                 await usersCollection.updateOne(
                     { _id: userId },
-                    userUpdateDoc
+                    userUpdateDoc,
+                    { upsert: true }
                 );
 
                 res.send({ success: true, isSubscribed: isSubscribing });
@@ -259,19 +260,19 @@ async function run() {
 
 
         // 👤 সিঙ্গেল ইউজার ডাটা রাউট
-       app.get('/users/:userId', async (req, res) => {
-    const { userId } = req.params;
-    // প্রথমে "users" (plural) কালেকশনে খোঁজে
-    let result = await usersCollection.findOne({ _id: userId });
-    
-    // না পেলে "user" (singular / Better-Auth) কালেকশনে খোঁজে
-    if (!result) {
-        const userCollection = db.collection("user");
-        result = await userCollection.findOne({ _id: userId });
-    }
-    
-    res.json(result);
-});
+        app.get('/users/:userId', async (req, res) => {
+            const { userId } = req.params;
+            // প্রথমে "users" (plural) কালেকশনে খোঁজে
+            let result = await usersCollection.findOne({ _id: userId });
+
+            // না পেলে "user" (singular / Better-Auth) কালেকশনে খোঁজে
+            if (!result) {
+                const userCollection = db.collection("user");
+                result = await userCollection.findOne({ _id: userId });
+            }
+
+            res.json(result);
+        });
 
         //  নির্দিষ্ট চ্যানেলের প্রোফাইল ও ভিডিও ডাটা গেট রাউট
         app.get('/channels/:id', async (req, res) => {
@@ -360,13 +361,13 @@ async function run() {
         });
 
 
-     
+
 
         // নির্দিষ্ট ভিডিওর সব কমেন্ট গেট 
         app.get('/videos/:id/comments', async (req, res) => {
             try {
                 const videoId = req.params.id;
-                
+
                 // Aggregation দিয়ে কমেন্টের সাথে ইউজারের ইনফরমেশন (যেমন নাম, ছবি) যুক্ত করা
                 const comments = await commentsCollection.aggregate([
                     { $match: { videoId } },
@@ -432,17 +433,17 @@ async function run() {
         //  লাইব্রেরি পেজের জন্য: লগইন করা ইউজারের লাইক দেওয়া সব ভিডিও 
         app.get('/api/library/liked-videos', verifyToken, async (req, res) => {
             try {
-               
+
                 const { userId } = req.query;
 
                 if (!userId) {
                     return res.status(400).send({ message: "User ID required" });
                 }
 
-                
+
                 const likedVideos = await videosCollection.aggregate([
                     {
-                        $match: { likes: userId } 
+                        $match: { likes: userId }
                     },
                     {
                         $addFields: {
@@ -476,22 +477,23 @@ async function run() {
         app.get('/api/library/subscribed-channels', verifyToken, async (req, res) => {
             try {
                 const { userId } = req.query;
-
                 if (!userId) {
                     return res.status(400).send({ message: "User ID required" });
                 }
-
-               
-                const userProfile = await usersCollection.findOne({ _id: userId });
-
+                // প্রথমে "users"-এ খোঁজে, না পেলে "user" (Better-Auth) কালেকশনে খোঁজে
+                let userProfile = await usersCollection.findOne({ _id: userId });
+                if (!userProfile) {
+                    const userCollection = db.collection("user");
+                    userProfile = await userCollection.findOne({ _id: userId });
+                }
                 if (!userProfile || !userProfile.following || userProfile.following.length === 0) {
-                    return res.send([]); 
+                    return res.send([]);
                 }
 
-               
+
                 const subscribedChannels = await usersCollection.find(
                     { _id: { $in: userProfile.following } },
-                    { projection: { channelName: 1, avatar: 1, subscribers: 1 } } 
+                    { projection: { channelName: 1, avatar: 1, subscribers: 1 } }
                 ).toArray();
 
                 res.send(subscribedChannels);
