@@ -259,11 +259,19 @@ async function run() {
 
 
         // 👤 সিঙ্গেল ইউজার ডাটা রাউট
-        app.get('/users/:userId', async (req, res) => {
-            const { userId } = req.params;
-            const result = await usersCollection.findOne({ _id: userId });
-            res.json(result);
-        });
+       app.get('/users/:userId', async (req, res) => {
+    const { userId } = req.params;
+    // প্রথমে "users" (plural) কালেকশনে খোঁজে
+    let result = await usersCollection.findOne({ _id: userId });
+    
+    // না পেলে "user" (singular / Better-Auth) কালেকশনে খোঁজে
+    if (!result) {
+        const userCollection = db.collection("user");
+        result = await userCollection.findOne({ _id: userId });
+    }
+    
+    res.json(result);
+});
 
         //  নির্দিষ্ট চ্যানেলের প্রোফাইল ও ভিডিও ডাটা গেট রাউট
         app.get('/channels/:id', async (req, res) => {
