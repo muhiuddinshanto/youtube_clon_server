@@ -413,6 +413,68 @@ async function run() {
             }
         });
 
+        // চ্যানেল এডিট রাউট
+        app.put('/api/channel/:id', verifyToken, async (req, res) => {
+            try {
+                const channelId = req.params.id;
+                const { userId, channelName, username, bio, avatar, coverImage } = req.body;
+
+                if (!userId) {
+                    return res.status(400).send({ message: "User ID required" });
+                }
+
+                if (userId !== channelId) {
+                    return res.status(403).send({ message: "You are not authorized to edit this channel" });
+                }
+
+                if (!channelName || !channelName.trim()) {
+                    return res.status(400).send({ message: "Channel name required" });
+                }
+
+                if (!username || !username.trim()) {
+                    return res.status(400).send({ message: "Username required" });
+                }
+
+                const formattedUsername = username.toLowerCase().replace(/[^a-z0-9._-]/g, "");
+
+                const channel = await usersCollection.findOne({ _id: channelId });
+                if (!channel) {
+                    return res.status(404).send({ message: "Channel not found" });
+                }
+
+                const usernameExists = await usersCollection.findOne({
+                    _id: { $ne: channelId },
+                    username: formattedUsername
+                });
+
+                if (usernameExists) {
+                    return res.status(409).send({ message: "Username already taken" });
+                }
+
+                const updateFields = {
+                    channelName: channelName.trim(),
+                    username: formattedUsername,
+                    bio: bio || "",
+                    avatar: avatar || "",
+                    coverImage: coverImage || "",
+                    updatedAt: new Date().toISOString()
+                };
+
+                await usersCollection.updateOne(
+                    { _id: channelId },
+                    { $set: updateFields }
+                );
+
+                res.send({
+                    success: true,
+                    message: "Channel updated successfully"
+                });
+            } catch (error) {
+                console.error("Channel Update Error:", error);
+                res.status(500).send({ message: "Failed to update channel" });
+            }
+        });
+
         //  ভিডিও আপলোড রাউট
         app.post('/api/video/upload', verifyToken, async (req, res) => {
             try {
