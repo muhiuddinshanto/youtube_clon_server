@@ -1,240 +1,161 @@
-# 🎥 YouTube Clone Backend API
+# YouTube Clone Server
 
-A RESTful backend API for a YouTube Clone application built with **Node.js**, **Express.js**, and **MongoDB**. This server handles video management, channel creation, subscriptions, likes/dislikes, comments, user profiles, and JWT authentication.
+Backend API for a YouTube-style video sharing application. This server powers video feeds, channel profiles, subscriptions, likes/dislikes, comments, library data, and JWT-protected user actions.
 
----
+## Live Links
 
-## 🚀 Features
+- Server API: https://youtube-clon-server.vercel.app
+- Client Site: https://youtube-clon-client.vercel.app
 
-### 👤 User Features
+## Features
 
-* Get all users
-* Get single user profile
-* Create or update channel
-* Subscribe / unsubscribe channels
-* View subscribed channels
+- Video list with channel information
+- Single video details
+- Video upload, update, and delete
+- Like and dislike system
+- Comment create, read, update, and delete
+- User profile and channel data
+- Channel create/update
+- Subscribe and unsubscribe channels
+- Liked videos and subscribed channels library
+- JWT authentication using remote JWKS
+- MongoDB aggregation for joined video, user, and comment data
 
-### 🎬 Video Features
+## Tech Stack
 
-* Get all videos with channel information
-* Get single video details
-* Upload new videos
-* Like / Unlike videos
-* Dislike / Remove dislike from videos
+- Node.js
+- Express.js
+- MongoDB
+- MongoDB Aggregation Pipeline
+- JOSE for JWT verification
+- CORS
+- dotenv
 
-### 💬 Comment Features
+## Environment Variables
 
-* Get comments of a specific video
-* Post comments on videos
-
-### 📚 Library Features
-
-* Get liked videos
-* Get subscribed channels
-
-### 🔐 Authentication
-
-* JWT verification using JOSE
-* Remote JWKS support
-* Protected API routes
-
----
-
-## 🛠️ Technologies Used
-
-* Node.js
-* Express.js
-* MongoDB
-* MongoDB Aggregation Pipeline
-* JOSE (JWT Verification)
-* dotenv
-* cors
-
----
-
-## 📂 Project Structure
-
-```bash
-├── server.js
-├── .env
-├── package.json
-└── README.md
-```
-
----
-
-## ⚙️ Environment Variables
-
-Create a `.env` file in the root directory.
+Create a `.env` file in the project root:
 
 ```env
 PORT=5000
-
 MONGODB_URI=your_mongodb_connection_string
-
 CLIENT_URI=http://localhost:3000
 ```
 
----
+For production, `CLIENT_URI` should point to the deployed client:
 
-## 📦 Installation
-
-### Clone Repository
-
-```bash
-git clone https://github.com/yourusername/youtube-clone-backend.git
+```env
+CLIENT_URI=https://youtube-clon-client.vercel.app
 ```
 
-### Navigate to Project
-
-```bash
-cd youtube-clone-backend
-```
-
-### Install Dependencies
+## Installation
 
 ```bash
 npm install
 ```
 
-### Start Development Server
+## Run Locally
 
 ```bash
-npm run dev
+node index.js
 ```
 
-### Start Production Server
+The server will run on:
 
-```bash
-npm start
+```text
+http://localhost:5000
 ```
 
----
+## API Endpoints
 
-# 📡 API Endpoints
+### Root
 
----
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/` | Server health/status message |
 
-## Root
+### Videos
 
-### GET /
+| Method | Endpoint | Protected | Description |
+| --- | --- | --- | --- |
+| GET | `/videos` | No | Get all videos with channel data |
+| GET | `/videos/:id` | No | Get a single video |
+| POST | `/api/video/upload` | Yes | Upload a new video |
+| PUT | `/api/video/:id` | Yes | Update a video |
+| DELETE | `/api/video/:id` | Yes | Delete a video |
+| PUT | `/videos/:id/like` | Yes | Like or unlike a video |
+| PUT | `/videos/:id/dislike` | Yes | Dislike or remove dislike |
 
-Returns server status.
+### Comments
+
+| Method | Endpoint | Protected | Description |
+| --- | --- | --- | --- |
+| GET | `/videos/:id/comments` | No | Get comments for a video |
+| POST | `/videos/:id/comments` | Yes | Add a comment |
+| PUT | `/videos/:videoId/comments/:commentId` | Yes | Edit a comment |
+| DELETE | `/videos/:videoId/comments/:commentId` | Yes | Delete a comment |
+
+### Users & Channels
+
+| Method | Endpoint | Protected | Description |
+| --- | --- | --- | --- |
+| GET | `/users` | No | Get all users |
+| GET | `/users/:userId` | No | Get a single user |
+| GET | `/channels/:id` | No | Get channel profile and videos |
+| POST | `/api/channel/create` | Yes | Create or update a channel |
+| PUT | `/users/:id/subscribe` | No | Subscribe or unsubscribe a channel |
+
+### Library
+
+| Method | Endpoint | Protected | Description |
+| --- | --- | --- | --- |
+| GET | `/api/library/liked-videos?userId=USER_ID` | Yes | Get user's liked videos |
+| GET | `/api/library/subscribed-channels?userId=USER_ID` | Yes | Get user's subscribed channels |
+
+## Authentication
+
+Protected routes require a bearer token:
 
 ```http
-GET /
+Authorization: Bearer YOUR_ACCESS_TOKEN
 ```
 
-Response:
+The API verifies tokens using the client JWKS endpoint:
 
-```json
-"Hello from youtube clone server"
+```text
+{CLIENT_URI}/api/auth/jwks
 ```
 
----
+## Example Requests
 
-# 🎬 Videos
-
-## Get All Videos
-
-```http
-GET /videos
-```
-
-Returns all videos with channel information.
-
----
-
-## Get Single Video
-
-```http
-GET /videos/:id
-```
-
-Returns a specific video with channel information.
-
----
-
-## Upload Video
-
-```http
-POST /api/video/upload
-```
-
-Protected Route ✅
-
-Request Body:
+### Upload Video
 
 ```json
 {
   "userId": "user_id",
-  "title": "Video Title",
-  "description": "Video Description",
-  "videoUrl": "video_url",
-  "thumbnailUrl": "thumbnail_url",
+  "title": "My First Video",
+  "description": "Video description",
+  "videoUrl": "https://example.com/video.mp4",
+  "thumbnailUrl": "https://example.com/thumb.jpg",
   "durationText": "10:30",
   "category": "Education",
-  "tags": ["react", "node"]
+  "tags": ["node", "express", "mongodb"]
 }
 ```
 
----
-
-## Like Video
-
-```http
-PUT /videos/:id/like
-```
-
-Protected Route ✅
-
-Request Body:
+### Create Channel
 
 ```json
 {
-  "userId": "user_id"
+  "userId": "user_id",
+  "channelName": "Code With Me",
+  "username": "codewithme",
+  "bio": "Learning web development together",
+  "avatar": "https://example.com/avatar.jpg",
+  "coverImage": "https://example.com/cover.jpg"
 }
 ```
 
----
-
-## Dislike Video
-
-```http
-PUT /videos/:id/dislike
-```
-
-Protected Route ✅
-
-Request Body:
-
-```json
-{
-  "userId": "user_id"
-}
-```
-
----
-
-# 💬 Comments
-
-## Get Video Comments
-
-```http
-GET /videos/:id/comments
-```
-
----
-
-## Add Comment
-
-```http
-POST /videos/:id/comments
-```
-
-Protected Route ✅
-
-Request Body:
+### Add Comment
 
 ```json
 {
@@ -243,155 +164,24 @@ Request Body:
 }
 ```
 
----
+## Database Collections
 
-# 👤 Users
+- `users`
+- `videos`
+- `comments`
+- `user` fallback collection for auth user lookup
 
-## Get All Users
+## Project Structure
 
-```http
-GET /users
+```text
+youtube_clon_server/
+|-- index.js
+|-- package.json
+|-- package-lock.json
+|-- .env
+`-- README.md
 ```
 
----
+## Author
 
-## Get Single User
-
-```http
-GET /users/:userId
-```
-
----
-
-# 📺 Channels
-
-## Get Channel Profile & Videos
-
-```http
-GET /channels/:id
-```
-
-Returns:
-
-```json
-{
-  "profile": {},
-  "videos": []
-}
-```
-
----
-
-## Create / Update Channel
-
-```http
-POST /api/channel/create
-```
-
-Protected Route ✅
-
-Request Body:
-
-```json
-{
-  "userId": "user_id",
-  "channelName": "Programming Hero",
-  "username": "programminghero",
-  "bio": "Learn coding",
-  "avatar": "image_url",
-  "coverImage": "cover_url"
-}
-```
-
----
-
-## Subscribe / Unsubscribe Channel
-
-```http
-PUT /users/:id/subscribe
-```
-
-Request Body:
-
-```json
-{
-  "userId": "subscriber_user_id",
-  "isSubscribing": true
-}
-```
-
----
-
-# 📚 Library
-
-## Get Liked Videos
-
-```http
-GET /api/library/liked-videos?userId=USER_ID
-```
-
-Protected Route ✅
-
----
-
-## Get Subscribed Channels
-
-```http
-GET /api/library/subscribed-channels?userId=USER_ID
-```
-
-Protected Route ✅
-
----
-
-# 🔐 Authentication
-
-Protected routes require an Authorization header.
-
-Example:
-
-```http
-Authorization: Bearer YOUR_ACCESS_TOKEN
-```
-
-The server verifies JWT tokens using a remote JWKS endpoint.
-
----
-
-# 🗄️ Database Collections
-
-The project uses the following MongoDB collections:
-
-```bash
-users
-videos
-comments
-```
-
----
-
-# 📈 Future Improvements
-
-* Video View Count Tracking
-* Playlist System
-* Notifications
-* Search & Filters
-* Video Categories
-* Live Streaming Support
-* Video Analytics Dashboard
-
----
-
-# 🤝 Contributing
-
-Contributions, issues, and feature requests are welcome.
-
-Feel free to fork this repository and submit pull requests.
-
----
-
-
-
-## 👨‍💻 Author
-
-Developed with ❤️ using Node.js, Express, and MongoDB.
+Developed by Mohiuddin.

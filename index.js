@@ -180,6 +180,88 @@ async function run() {
             }
         });
 
+        // কমেন্ট এডিট রাউট
+        app.put('/videos/:videoId/comments/:commentId', verifyToken, async (req, res) => {
+            try {
+                const { commentId } = req.params;
+                const { userId, text } = req.body;
+
+                if (!userId) {
+                    return res.status(400).send({ message: "User ID required" });
+                }
+
+                if (!text || !text.trim()) {
+                    return res.status(400).send({ message: "Comment text required" });
+                }
+
+                let query = { _id: commentId };
+                if (ObjectId.isValid(commentId)) {
+                    query = { $or: [{ _id: commentId }, { _id: new ObjectId(commentId) }] };
+                }
+
+                const comment = await commentsCollection.findOne(query);
+                if (!comment) {
+                    return res.status(404).send({ message: "Comment not found" });
+                }
+
+                if (comment.userId !== userId) {
+                    return res.status(403).send({ message: "You are not authorized to edit this comment" });
+                }
+
+                await commentsCollection.updateOne(
+                    { _id: comment._id },
+                    {
+                        $set: {
+                            text: text.trim(),
+                            updatedAt: new Date().toISOString()
+                        }
+                    }
+                );
+
+                res.send({ success: true, message: "Comment updated successfully" });
+            } catch (error) {
+                console.error("Comment Update Error:", error);
+                res.status(500).send({ message: "Failed to update comment" });
+            }
+        });
+
+        // কমেন্ট ডিলিট রাউট
+        app.delete('/videos/:videoId/comments/:commentId', verifyToken, async (req, res) => {
+            try {
+                const { videoId, commentId } = req.params;
+                const { userId } = req.body;
+
+                if (!userId) {
+                    return res.status(400).send({ message: "User ID required" });
+                }
+
+                let query = { _id: commentId };
+                if (ObjectId.isValid(commentId)) {
+                    query = { $or: [{ _id: commentId }, { _id: new ObjectId(commentId) }] };
+                }
+
+                const comment = await commentsCollection.findOne(query);
+                if (!comment) {
+                    return res.status(404).send({ message: "Comment not found" });
+                }
+
+                if (comment.videoId !== videoId) {
+                    return res.status(400).send({ message: "Comment does not belong to this video" });
+                }
+
+                if (comment.userId !== userId) {
+                    return res.status(403).send({ message: "You are not authorized to delete this comment" });
+                }
+
+                await commentsCollection.deleteOne({ _id: comment._id });
+
+                res.send({ success: true, message: "Comment deleted successfully" });
+            } catch (error) {
+                console.error("Comment Delete Error:", error);
+                res.status(500).send({ message: "Failed to delete comment" });
+            }
+        });
+
         // সিঙ্গেল ভিডিও ডিসলাইক রাউট
         app.put('/videos/:id/dislike', verifyToken, async (req, res) => {
             try {
@@ -422,6 +504,92 @@ async function run() {
             } catch (error) {
                 console.error("Post Comment Error:", error);
                 res.status(500).send("Server Error");
+            }
+        });
+
+        // ভিডিও এডিট করার রাউট (লগইন করা উজারদের জন্য)
+        app.put('/api/video/:id', verifyToken, async (req, res) => {
+            try {
+                const videoId = req.params.id;
+                const { userId, title, description, thumbnailUrl, category, tags } = req.body;
+
+                if (!userId) {
+                    return res.status(400).send({ message: "User ID required" });
+                }
+
+                // ভিডিও খোঁজা (স্ট্রিং ও ObjectId দুটোই সাপোর্ট করে)
+                let query = { _id: videoId };
+                if (ObjectId.isValid(videoId)) {
+                    query = { $or: [{ _id: videoId }, { _id: new ObjectId(videoId) }] };
+                }
+
+                const video = await videosCollection.findOne(query);
+                if (!video) {
+                    return res.status(404).send({ message: "Video not found" });
+                }
+
+                // শুধুমাত্র ভিডিওর মালিকই এডিট করতে পারবে
+                if (video.userId !== userId) {
+                    return res.status(403).send({ message: "You are not authorized to edit this video" });
+                }
+
+                // শুধুমাত্র যেসব ফিল্ড পাঠানো হয়েছে সেগুলোই আপডেট হবে
+                const updateFields = {};
+                if (title !== undefined) updateFields.title = title;
+                if (description !== undefined) updateFields.description = description;
+                if (thumbnailUrl !== undefined) updateFields.thumbnailUrl = thumbnailUrl;
+                if (category !== undefined) updateFields.category = category;
+                if (tags !== undefined) updateFields.tags = tags;
+                updateFields.updatedAt = new Date().toISOString();
+
+                await videosCollection.updateOne(
+                    { _id: video._id },
+                    { $set: updateFields }
+                );
+
+                res.send({ success: true, message: "Video updated successfully" });
+            } catch (error) {
+                console.error("Video Update Error:", error);
+                res.status(500).send({ message: "Failed to update video" });
+            }
+        });
+
+        // ভিডিও ডিলিট রাউট
+        app.delete('/api/video/:id', verifyToken, async (req, res) => {
+            try {
+                const videoId = req.params.id;
+                const { userId } = req.body;
+
+                if (!userId) {
+                    return res.status(400).send({ message: "User ID required" });
+                }
+
+                // ভিডিও খোঁজা
+                let query = { _id: videoId };
+                if (ObjectId.isValid(videoId)) {
+                    query = { $or: [{ _id: videoId }, { _id: new ObjectId(videoId) }] };
+                }
+
+                const video = await videosCollection.findOne(query);
+                if (!video) {
+                    return res.status(404).send({ message: "Video not found" });
+                }
+
+                // শুধুমাত্র ভিডিওর মালিকই ডিলিট করতে পারবে
+                if (video.userId !== userId) {
+                    return res.status(403).send({ message: "You are not authorized to delete this video" });
+                }
+
+                // ভিডিও ডিলিট
+                await videosCollection.deleteOne({ _id: video._id });
+
+                // এই ভিডিওর সব কমেন্টও ডিলিট করা
+                await commentsCollection.deleteMany({ videoId: videoId });
+
+                res.send({ success: true, message: "Video deleted successfully" });
+            } catch (error) {
+                console.error("Video Delete Error:", error);
+                res.status(500).send({ message: "Failed to delete video" });
             }
         });
 
